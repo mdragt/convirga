@@ -47,6 +47,15 @@ namespace AMLRetrainUsingSQL
             //it only has one entry in the Dictionary with a text string indicating no scoring data. 
             MLRetrainerLib.RetrainerLib retrainer = new MLRetrainerLib.RetrainerLib(configobj);
 
+            //This is for display. it allows a person to view the results of the last model training.
+            //This List is stored initially in the Library upon object instatiation. If there is no previous retrainging then there will only be one entry in the Dictionary. 
+            //This example is here only so that you can comoare the last result with the new result after retraining. 
+            Console.WriteLine("Results of last training: ");
+            foreach (var val in retrainer.lastScores)
+            {
+                Console.WriteLine("Rating Name: {0} : Value: {1}", val.Key, val.Value.ToString());
+            }
+
             //Retraining a model takes two steps; queue up the job then start the job. One must save the jobID in order to start the job
             //STEP ONE: Assuming your config params are correct, you queue up a retraining job using this call. Be sure to save the jobID or else you won't be able to start
             //the job. If you don't start the job it will be automatically deleted after a few minutes (per the ML doc)
@@ -70,6 +79,8 @@ namespace AMLRetrainUsingSQL
             //Here is when we spin lock until we show that the retraining job is Finished
             do
             {
+                // display job status
+                Console.WriteLine("Checking the job status...");
                 status = retrainer.CheckJobStatus(jobID).Result;
                 Console.WriteLine(status.ToString());
             } while (!(status == MLRetrainerLib.BatchScoreStatusCode.Finished));
@@ -77,14 +88,50 @@ namespace AMLRetrainUsingSQL
             //Now we look at the new (latest) results. 
             //These are pulled from CSV files in the configured Azure Blob Storaged
             Console.WriteLine("New Scores for retraining...");
-            //Dictionary<string, double> scores = retrainer.GetLatestRetrainedResults();
-            //foreach (var val in scores)
-            //{
-            //    Console.WriteLine("Rating Name: {0} : Value: {1}", val.Key, val.Value.ToString());
-            //}
+            Dictionary<string, double> scores = retrainer.GetLatestRetrainedResults();
+            foreach (var val in scores)
+            {
+                Console.WriteLine("Rating Name: {0} : Value: {1}", val.Key, val.Value.ToString());
+            }
+            
+            //STEP FOUR: Check to see if the new model is more accurate. 
+            //Here is where we compare the current result to the last result. 
+            //In this scenario, we compare Accuracy and if we haven't at least seen a 1% improvement then we don't deploy the retrained model
+            //There are seven values to review and the API currently only allows you to select one. In this case it's Accuracy. 
+            //The second param indicates the improvement amount that the retrained model should have in order to get TRUE back from the API call.
+            //The third parameter indicates the result from the last training, to be compared with the last scores of the model.
+            //If the model hasn't improved, we delete the last scores.
+            Console.WriteLine("Now check if we deploy the new model to the published endpoint...");
+            
+            bool isModelbetter = retrainer.isUpdateModel("Accuracy", 0.01f, scores);
+            if (!isModelbetter)
+            {
 
-            //string resultOfRetrain = retrainer.GetLatestRetrainedResults(true);
-            //Console.WriteLine(resultOfRetrain);
+                Console.WriteLine("No need to update endpoint. Model has not improved. Press a key to delete retraining results");
+                Console.ReadLine();
+
+                // delete latest results from retraining
+                retrainer.DeleteLatestRetrainedResults();
+
+                return; //if the model isn't more accurate then terminate the app by returning
+            }
+
+            //STEP FIVE: Deploy the updated, retrained model if the selected value has improved.
+            //Here is where we deploy the model to the published endpoint IF the accuracy has met our hurdle
+            //You use the same jobID that you used to start the job
+            bool isUpdated = retrainer.UpdateModel(jobID).Result;
+            if (isUpdated)
+            {
+                Console.WriteLine("Successful model retraining and endpoint deployment");
+            }
+            else
+            {
+                Console.WriteLine("Something went wrong updating the model");
+            }
+
+            Console.WriteLine("Process has completed. Press a key to end");
+            Console.ReadLine();
+
         }
     }
 }
