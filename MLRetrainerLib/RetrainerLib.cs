@@ -140,6 +140,12 @@ namespace MLRetrainerLib
                     RelativeLocation = _trainingBlob.Uri.LocalPath
                 };
             }
+            
+            // create dynamic names for ilearner and csv output files
+            var date = DateTime.Now.ToString("yyyyMMddHHmmss");
+
+            var modelFile = "/{0}/{1}test-{2}.ilearner";
+            var modelResult = "/{0}/{1}retrainer-{2}.csv";
 
             //Now do outputs
             var outputs = new Dictionary<string, AzureBlobDataReference>()
@@ -149,7 +155,7 @@ namespace MLRetrainerLib
                         new AzureBlobDataReference()
                         {
                             ConnectionString = _storageConnectionString,
-                            RelativeLocation = string.Format("/{0}/{1}.ilearner", _mlstoragecontainer, _currentModelTraining)
+                            RelativeLocation = string.Format(modelFile, _mlstoragecontainer, _currentModelTraining, date)
                         }
                     },
                     {
@@ -157,7 +163,7 @@ namespace MLRetrainerLib
                         new AzureBlobDataReference()
                         {
                             ConnectionString = _storageConnectionString,
-                            RelativeLocation = string.Format("/{0}/{1}.csv", _mlstoragecontainer, _currentModelTraining)
+                            RelativeLocation = string.Format(modelResult, _mlstoragecontainer, _currentModelTraining, date)
                         }
                     },
                 };
@@ -333,7 +339,7 @@ namespace MLRetrainerLib
         public async Task<Boolean> UpdateModel(string jobId)
         {
             BatchScoreStatus status;
-            bool isUdpated = false;
+            bool isUpdated = false;
 
             try
             {
@@ -353,9 +359,9 @@ namespace MLRetrainerLib
                 }
 
                 AzureBlobDataReference res = status.Results["output2"];
-                isUdpated = await UpdateRetrainedModel(res.BaseLocation, res.RelativeLocation, res.SasBlobToken, _storageConnectionString);
+                isUpdated = await UpdateRetrainedModel(res.BaseLocation, res.RelativeLocation, res.SasBlobToken, _storageConnectionString);
                 //isUdpated = await UpdateRetrainedModel2(res.BaseLocation, res.RelativeLocation, res.SasBlobToken, _storageConnectionString);
-                return isUdpated;
+                return isUpdated;
             }
             catch
             {
@@ -530,6 +536,33 @@ namespace MLRetrainerLib
         }
 
         /// <summary>
+        /// This used to delete the latest training results
+        /// </summary>
+        /// <returns></returns>
+        public void DeleteLatestRetrainedResults()
+        {
+            string conn = _storageConnectionString;
+            Dictionary<string, Double> vals = null;
+            try
+            {
+                var blobClient = CloudStorageAccount.Parse(conn).CreateCloudBlobClient();
+                var container = blobClient.GetContainerReference(_mlstoragecontainer);
+                //container.CreateIfNotExists();
+                var retrainerList = container.ListBlobs(retrainerPrefix, true);
+                var res = from b in retrainerList
+                          where b.StorageUri.PrimaryUri.AbsoluteUri.EndsWith(".csv")
+                          orderby b.StorageUri.PrimaryUri.AbsoluteUri descending
+                          select b;
+
+                CloudBlockBlob blob = (CloudBlockBlob)res.FirstOrDefault();
+                blob.Delete();
+            }
+            catch (Exception)
+            {
+                return; //Empty
+            }
+        }
+        /// <summary>
         /// This method retrives the results of the last model retraining. If there are no existing results (it has never run) then it will return null
         /// </summary>
         /// <returns>A filled in Dictionary of model metrics. If none was stored then a single entry with 'nometrics' as the only key</returns>
@@ -677,18 +710,18 @@ namespace MLRetrainerLib
         /// <param name="measuredValue"></param>
         /// <param name="pctImproveMin">This should be in it's decimal form such as 0.02f for 2% improvement target as an exmaple</param>
         /// <returns></returns>
-        public bool isUdpateModel(string measuredValue, float pctImproveMin)
+        public bool isUdpateModel(string measuredValue, float pctImproveMin, Dictionary<string,double> resultOfRetrain)
         {
             if (String.IsNullOrEmpty(measuredValue) || pctImproveMin == 0 || retrainedScores == null)
             {
                 return false;
             }
-            if (lastScores == null) { return true;
+            if (lastScores == null || lastScores.Count == 0) { return true;
             }
             bool isImproved = false;
 
             var lastCompareScore = lastScores[measuredValue];
-            var newCompareScore = retrainedScores[measuredValue];
+            var newCompareScore = resultOfRetrain[measuredValue];
 
             var improvement = lastCompareScore + (lastCompareScore * pctImproveMin);
             if (newCompareScore >= improvement) { isImproved = true; }
