@@ -27,6 +27,7 @@ namespace MLRetrainerLib
         public string _mlstoragename { get; set; }
         public string _mlstoragekey { get; set; }
         public string _mlstoragecontainer { get; set; }
+        public string _mlstoragecontainerhist { get; set; }
         public string _nameOfEndpoint { get; set; } //used to push an updated model to the web endpoint
         public string _endpoint2url { get; set; }
         public string _endpoint2key { get; set; }
@@ -45,6 +46,7 @@ namespace MLRetrainerLib
         public enum RESULTS_TYPE { BINARYCLASS, MULTICLASS };
 
         private string retrainerPrefix = "retrainer-";
+        private string testPrefix = "test-";
 
         private CloudBlockBlob _trainingBlob;
 
@@ -73,6 +75,7 @@ namespace MLRetrainerLib
             _mlstoragename = configobj.mlretrainerstoragename;
             _mlstoragekey = configobj.mlretrainerstoragekey;
             _mlstoragecontainer = configobj.mlretrainercontainername;
+            _mlstoragecontainerhist = configobj.mlretrainercontainerhistname;
             _nameOfEndpoint = configobj.publishendpointname;
             _endpoint2url = configobj.publishendpoint2url;
             _endpoint2key = configobj.publishendpoint2key;
@@ -548,6 +551,7 @@ namespace MLRetrainerLib
                 var blobClient = CloudStorageAccount.Parse(conn).CreateCloudBlobClient();
                 var container = blobClient.GetContainerReference(_mlstoragecontainer);
                 //container.CreateIfNotExists();
+                // get the last training results
                 var retrainerList = container.ListBlobs(retrainerPrefix, true);
                 var res = from b in retrainerList
                           where b.StorageUri.PrimaryUri.AbsoluteUri.EndsWith(".csv")
@@ -556,12 +560,80 @@ namespace MLRetrainerLib
 
                 CloudBlockBlob blob = (CloudBlockBlob)res.FirstOrDefault();
                 blob.Delete();
+                
+                // get the last model
+                var modelList = container.ListBlobs(testPrefix, true);
+                var resModel = from b in modelList
+                               where b.StorageUri.PrimaryUri.AbsoluteUri.EndsWith(".ilearner")
+                               orderby b.StorageUri.PrimaryUri.AbsoluteUri descending
+                               select b;
+
+                CloudBlockBlob blobModel = (CloudBlockBlob)resModel.FirstOrDefault();
+                blobModel.Delete();
+
             }
             catch (Exception)
             {
                 return; //Empty
             }
         }
+        
+        /// <summary>
+        /// This used to store all training results
+        /// </summary>
+        /// <param name="isString"></param>
+        /// <returns></returns>
+        public void StoreRetrainedResults()
+        {
+            string conn = _storageConnectionString;
+            Dictionary<string, Double> vals = null;
+            try
+            {
+                var blobClient = CloudStorageAccount.Parse(conn).CreateCloudBlobClient();
+                var container = blobClient.GetContainerReference(_mlstoragecontainer);
+
+                // store retrainer data to build up history
+                var containerHist = blobClient.GetContainerReference(_mlstoragecontainerhist);
+                containerHist.CreateIfNotExists();
+
+                // get the last training results scores
+                var retrainerList = container.ListBlobs(retrainerPrefix, true);
+                var res = from b in retrainerList
+                          where b.StorageUri.PrimaryUri.AbsoluteUri.EndsWith(".csv")
+                          orderby b.StorageUri.PrimaryUri.AbsoluteUri descending
+                          select b;
+
+                CloudBlockBlob blob = (CloudBlockBlob)res.FirstOrDefault();
+
+                // copy the results
+                var blobName = blob.Name;
+                CloudBlockBlob sourceBlob = container.GetBlockBlobReference(blobName);
+                CloudBlockBlob targetBlob = containerHist.GetBlockBlobReference(blobName);
+                targetBlob.StartCopy(sourceBlob);
+
+                // get the last model results
+                var modelList = container.ListBlobs(testPrefix, true);
+                var resModel =  from b in modelList
+                                where b.StorageUri.PrimaryUri.AbsoluteUri.EndsWith(".ilearner")
+                                orderby b.StorageUri.PrimaryUri.AbsoluteUri descending
+                                select b;
+
+                CloudBlockBlob blobModel = (CloudBlockBlob)resModel.FirstOrDefault();
+
+                // copy the results
+                var blobNameModel = blobModel.Name;
+                CloudBlockBlob sourceBlobModel = container.GetBlockBlobReference(blobNameModel);
+                CloudBlockBlob targetBlobModel = containerHist.GetBlockBlobReference(blobNameModel);
+                targetBlobModel.StartCopy(sourceBlobModel);
+
+
+            }
+            catch (Exception)
+            {
+                return; //Empty
+            }
+        }
+        
         /// <summary>
         /// This method retrives the results of the last model retraining. If there are no existing results (it has never run) then it will return null
         /// </summary>
@@ -753,6 +825,7 @@ namespace MLRetrainerLib
             public string mlretrainerstoragename { get; set; }
             public string mlretrainerstoragekey { get; set; }
             public string mlretrainercontainername { get; set; }
+            public string mlretrainercontainerhistname { get; set; }
             public string publishendpoint2url { get; set; }
             public string publishendpoint2key { get; set; }
 
