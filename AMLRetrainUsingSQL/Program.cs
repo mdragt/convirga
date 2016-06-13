@@ -39,6 +39,8 @@ namespace AMLRetrainUsingSQL
             configobj.mlretrainerstoragename = Properties.Settings.Default.mlstoragename;
             configobj.mlretrainerstoragekey = Properties.Settings.Default.mlstoragekey;
             configobj.mlretrainercontainername = Properties.Settings.Default.mlstoragecontainer;
+             // save historic retraining results
+            configobj.mlretrainercontainerhistname = Properties.Settings.Default.mlstoragecontainerhist;
 
 
             //This only takes one object but it must be prefilled first based on the notes above. 
@@ -94,7 +96,10 @@ namespace AMLRetrainUsingSQL
                 Console.WriteLine("Rating Name: {0} : Value: {1}", val.Key, val.Value.ToString());
             }
             
-            //STEP FOUR: Check to see if the new model is more accurate. 
+            // STEP FOUR: Store the retraining results for future analysis
+            retrainer.StoreRetrainedResults();
+            
+            //STEP FIVE: Check to see if the new model is more accurate. 
             //Here is where we compare the current result to the last result. 
             //In this scenario, we compare Accuracy and if we haven't at least seen a 1% improvement then we don't deploy the retrained model
             //There are seven values to review and the API currently only allows you to select one. In this case it's Accuracy. 
@@ -116,7 +121,7 @@ namespace AMLRetrainUsingSQL
                 return; //if the model isn't more accurate then terminate the app by returning
             }
 
-            //STEP FIVE: Deploy the updated, retrained model if the selected value has improved.
+            //STEP SIX: Deploy the updated, retrained model if the selected value has improved.
             //Here is where we deploy the model to the published endpoint IF the accuracy has met our hurdle
             //You use the same jobID that you used to start the job
             bool isUpdated = retrainer.UpdateModel(jobID).Result;
